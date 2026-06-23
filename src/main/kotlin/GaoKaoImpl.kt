@@ -114,51 +114,112 @@ fun parseScoreData(jsonString: String): ScoreData {
 }
 
 // ==================== Excel 导出 ====================
+// 修改 fetchScoreAndMsg，传入并保留完整的 ExamCandidate
+fun fetchScoreAndMsg(candidate: ExamCandidate): ExamResult {
+    return try {
+        val html = GaoKaoNet.require(candidate.examNo, candidate.idCard)
+        val scoreJson = extractScoreFromHtml(html)
+        val msg = extractMsgFromHtml(html)
+        val scoreData = if (scoreJson.isNotEmpty()) {
+            parseScoreData(scoreJson)
+        } else null
+        ExamResult(candidate, scoreData, msg)
+    } catch (e: Exception) {
+        ExamResult(candidate, null, error = e.message)
+    }
+}
+
+// 修改 writeResultsToExcel，动态生成科目列
 fun writeResultsToExcel(results: List<ExamResult>, outputPath: String) {
     val workbook = XSSFWorkbook()
     val sheet = workbook.createSheet("高考成绩")
 
-    // 表头
-    val headers = arrayOf(
-        "姓名", "报考号", "准考证号", "语文", "数学", "外语", "外语语种",
-        "首选科目名称", "首选科目成绩", "再选科目1名称", "再选科目1成绩",
-        "再选科目2名称", "再选科目2成绩", "加分", "总分", "排名", "原始分之和",
-        "提示信息", "错误信息"
-    )
+    // ---------- 1. 收集所有实际出现的科目名称 ----------
+    val wySet = mutableSetOf<String>()
+    val sxkmSet = mutableSetOf<String>()
+    val zxkm1Set = mutableSetOf<String>()
+    val zxkm2Set = mutableSetOf<String>()
+
+    results.forEach { result ->
+        result.scoreData?.let { d ->
+            if (d.wyyzmc.isNotBlank()) wySet.add(d.wyyzmc.trim())
+            if (d.sxkmmc.isNotBlank()) sxkmSet.add(d.sxkmmc.trim())
+            if (d.zxkm1mc.isNotBlank()) zxkm1Set.add(d.zxkm1mc.trim())
+            if (d.zxkm2mc.isNotBlank()) zxkm2Set.add(d.zxkm2mc.trim())
+        }
+    }
+    // 排序以保证列顺序稳定
+    val wyList = wySet.toList().sorted()
+    val sxkmList = sxkmSet.toList().sorted()
+    val zxkm1List = zxkm1Set.toList().sorted()
+    val zxkm2List = zxkm2Set.toList().sorted()
+
+    // ---------- 2. 构建表头 ----------
+    val headers = mutableListOf("姓名", "报考号", "准考证号", "语文", "数学")
+    headers.addAll(wyList)          // 外语列（语种作为列名）
+    headers.addAll(sxkmList)        // 首选科目列
+    headers.addAll(zxkm1List)       // 再选科目1列
+    headers.addAll(zxkm2List)       // 再选科目2列
+    headers.addAll(listOf("加分", "总分", "排名", "原始分之和", "提示信息", "错误信息"))
+
     val headerRow = sheet.createRow(0)
     headers.forEachIndexed { idx, header -> headerRow.createCell(idx).setCellValue(header) }
 
-    // 数据行
-    results.forEachIndexed { idx, result ->
-        val row = sheet.createRow(idx + 1)
+    // 建立“列名 → 列索引”的快速查找映射
+    val colIndexMap = headers.mapIndexed { i, h -> h to i }.toMap()
+
+    // ---------- 3. 填充数据 ----------
+    results.forEachIndexed { rowIdx, result ->
+        val row = sheet.createRow(rowIdx + 1)
+
         if (result.scoreData != null) {
             val d = result.scoreData
-            row.createCell(0).setCellValue(d.xm.trim())
-            row.createCell(1).setCellValue(d.ksh.trim())
-            row.createCell(2).setCellValue(d.zkzh.trim())
-            row.createCell(3).setCellValue(d.yw.trim())
-            row.createCell(4).setCellValue(d.sx.trim())
-            row.createCell(5).setCellValue(d.wy.trim())
-            row.createCell(6).setCellValue(d.wyyzmc.trim())
-            row.createCell(7).setCellValue(d.sxkmmc.trim())
-            row.createCell(8).setCellValue(d.sxkm.trim())
-            row.createCell(9).setCellValue(d.zxkm1mc.trim())
-            row.createCell(10).setCellValue(d.zxkm1.trim())
-            row.createCell(11).setCellValue(d.zxkm2mc.trim())
-            row.createCell(12).setCellValue(d.zxkm2.trim())
-            row.createCell(13).setCellValue(d.jf.trim())
-            row.createCell(14).setCellValue(d.tzf.trim())
-            row.createCell(15).setCellValue(d.pm.trim())
 
+            // 基本信息（优先用成绩中的姓名，失败时用原始名单姓名）
+            row.createCell(colIndexMap["姓名"]!!).setCellValue(d.xm.trim())
+            row.createCell(colIndexMap["报考号"]!!).setCellValue(d.ksh.trim())
+            row.createCell(colIndexMap["准考证号"]!!).setCellValue(d.zkzh.trim())
+            row.createCell(colIndexMap["语文"]!!).setCellValue(d.yw.trim())
+            row.createCell(colIndexMap["数学"]!!).setCellValue(d.sx.trim())
+
+            // 外语成绩（填入对应语种列）
+            val wyCol = colIndexMap[d.wyyzmc.trim()]!!
+            row.createCell(wyCol).setCellValue(d.wy.trim())
+
+            // 首选科目成绩（填入对应首选科目列）
+            val sxkmCol = colIndexMap[d.sxkmmc.trim()]!!
+            row.createCell(sxkmCol).setCellValue(d.sxkm.trim())
+
+            // 再选科目1成绩
+            val zxkm1Col = colIndexMap[d.zxkm1mc.trim()]!!
+            row.createCell(zxkm1Col).setCellValue(d.zxkm1.trim())
+
+            // 再选科目2成绩
+            val zxkm2Col = colIndexMap[d.zxkm2mc.trim()]!!
+            row.createCell(zxkm2Col).setCellValue(d.zxkm2.trim())
+
+            // 加分、总分、排名
+            row.createCell(colIndexMap["加分"]!!).setCellValue(d.jf.trim())
+            row.createCell(colIndexMap["总分"]!!).setCellValue(d.tzf.trim())
+            row.createCell(colIndexMap["排名"]!!).setCellValue(d.pm.trim())
+
+            // 原始分之和
             val sum = listOf(d.yw, d.sx, d.wy, d.sxkm, d.zxkm1, d.zxkm2)
                 .sumOf { it.trim().toIntOrNull() ?: 0 }
-            row.createCell(16).setCellValue(sum.toDouble())
-            row.createCell(17).setCellValue(result.msg)
-            row.createCell(18).setCellValue(result.error ?: "")
+            row.createCell(colIndexMap["原始分之和"]!!).setCellValue(sum.toDouble())
+
+            // 提示与错误信息
+            row.createCell(colIndexMap["提示信息"]!!).setCellValue(result.msg)
+            row.createCell(colIndexMap["错误信息"]!!).setCellValue(result.error ?: "")
         } else {
-            // 成绩获取失败，填充提示信息
-            row.createCell(17).setCellValue(result.msg)
-            row.createCell(18).setCellValue(result.error ?: "未获取到成绩数据")
+            // 成绩获取失败时，仅填充基本信息（来自原始名单）
+            val name = result.candidate.name.ifBlank { "" }
+            row.createCell(colIndexMap["姓名"]!!).setCellValue(name)
+            row.createCell(colIndexMap["报考号"]!!).setCellValue(result.candidate.examNo)
+            row.createCell(colIndexMap["准考证号"]!!).setCellValue("")
+            // 其他列留空
+            row.createCell(colIndexMap["提示信息"]!!).setCellValue(result.msg)
+            row.createCell(colIndexMap["错误信息"]!!).setCellValue(result.error ?: "未获取到成绩数据")
         }
     }
 
