@@ -25,6 +25,8 @@ dependencies {
 
     implementation("org.apache.logging.log4j:log4j-api:2.18.0")
     implementation("org.apache.logging.log4j:log4j-core:2.18.0")
+    implementation("org.json:json:20240303")
+    implementation(fileTree("libs") { include("*.jar") })
 
     testImplementation(kotlin("test"))
 }

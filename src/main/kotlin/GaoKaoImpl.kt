@@ -71,7 +71,7 @@ fun readCandidateListFromExcel(inputPath: String): List<ExamCandidate> {
 // ==================== 成绩获取与解析 ====================
 fun fetchScoreAndMsg(examNo: String, idCard: String): ExamResult {
     return try {
-        val html = GaoKaoNet.require(examNo, idCard)   // 假设此函数已实现网络请求
+        val html = GaoKaoNet.getGrade(examNo, idCard)   // 假设此函数已实现网络请求
         val scoreJson = extractScoreFromHtml(html)
         val msg = extractMsgFromHtml(html)
         val scoreData = if (scoreJson.isNotEmpty()) {
@@ -117,7 +117,7 @@ fun parseScoreData(jsonString: String): ScoreData {
 // 修改 fetchScoreAndMsg，传入并保留完整的 ExamCandidate
 fun fetchScoreAndMsg(candidate: ExamCandidate): ExamResult {
     return try {
-        val html = GaoKaoNet.require(candidate.examNo, candidate.idCard)
+        val html = GaoKaoNet.getGrade(candidate.examNo, candidate.idCard)
         val scoreJson = extractScoreFromHtml(html)
         val msg = extractMsgFromHtml(html)
         val scoreData = if (scoreJson.isNotEmpty()) {
